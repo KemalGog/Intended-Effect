@@ -1,0 +1,7 @@
+^IntendedEffect\.Rproj$
+^\.Rproj\.user$
+^analyses($|/)
+^reports($|/)
+^vignettes($|/)
+^Natural History Model($|/)
+^Fitting of Natural History Model($|/)
