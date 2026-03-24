@@ -1,0 +1,549 @@
+---
+title: "Cancer Incidence Projections Under Standard and Intended-Effect Trial Designs"
+author: "Kemal Caglar Gogebakan"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(gridExtra)
+library(scales)
+library(patchwork)
+library(here)
+
+# ---- Source scripts (relative paths) ----
+source(here("Natural History Model", "stage_shift_by_design.R"))
+source(here("Natural History Model", "Power.R"))
+
+# ---- Load fitted models ----
+load(here(
+  "Fitting of Natural History Model",
+  "Fitted_SEER_Data_Selected",
+  "lung_outfile.RData"
+))
+```
+
+# Scenario
+
+This section defines the trial design, test performance, and number of participants in each arm.  
+Users can change these inputs and rerun the file to explore alternative designs.
+
+```{r scenario-inputs}
+cancer <- "lung"
+
+OMST1 <- 3.5
+LMST1 <- 1
+
+start_age <- 66
+screen_int <- 1
+numscreens <- 10
+num_followup_intervals <- 1
+
+sens_e <- 0.20
+sens_l <- 0.95
+
+n_control <- 100000
+n_screen <-100000
+
+
+
+metadata <- get(paste0("metadata_", cancer))
+
+fitID <- metadata %>%
+  filter(OMST == OMST1, DMST == LMST1) %>%
+  pull(fitID)
+
+rate_matrix <- get(paste0(cancer, "out"))[[fitID]]$rate.matrix
+
+scenario_tbl <- data.frame(
+  Parameter = c(
+    "Cancer type",
+    "OMST (years)",
+    "LMST (years)",
+    "Early-stage sensitivity",
+    "Late-stage sensitivity",
+    "Screening interval",
+    "Number of screens",
+    "Follow-up years",
+    "Starting age",
+    "Number of participants (Control arm)",
+    "Number of participants (Screen arm)"
+  ),
+  Value = c(
+  cancer,
+  OMST1,
+  LMST1,
+  sprintf("%.0f%%", sens_e * 100),
+  sprintf("%.0f%%", sens_l * 100),
+  "Annual",
+  numscreens,
+  num_followup_intervals,
+  start_age,
+  n_control,
+  n_screen
+ )
+)
+
+kable(scenario_tbl)
+```
+
+
+# Run Main Projection Function
+
+This chunk runs the main projection function once and stores all trial results for:
+- both designs (`standard`, `IE`)
+- both arms (`control`, `screen`)
+- all stages (`early`, `late`, `overall`)
+- stage shift
+
+```{r run-main-function}
+results <- get_trial_results_by_design(
+  start_age = start_age,
+  numscreens = numscreens,
+  screen_int = screen_int,
+  num_followup_intervals = num_followup_intervals,
+  rate_matrix = rate_matrix,
+  sens_e = sens_e,
+  sens_l = sens_l,
+  n_control = n_control,
+  n_screen = n_screen
+)
+```
+
+# User Output Selection
+
+The tables and figures below are generated for one selected output format.  
+Users can rerun the file with different settings to obtain alternative yearly or cumulative results, and incidence or count outputs.
+
+```{r output-selection}
+cumulative_or_interval <- "cumulative"      # "yearly" or "cumulative"
+count_or_incidence <- "count"          # "incidence" or "count"
+show_early <- TRUE
+show_overall <- TRUE
+
+output_tbl <- data.frame(
+  Setting = c(
+    "Yearly or Cumulative",
+    "Outcome measure",
+    "Show early-stage results",
+    "Show overall results"
+  ),
+  Value = c(
+    cumulative_or_interval,
+    count_or_incidence,
+    ifelse(show_early, "Yes", "No"),
+    ifelse(show_overall, "Yes", "No")
+  )
+)
+
+kable(output_tbl, caption = "Selected output settings")
+```
+
+```{r title-helpers, include=FALSE}
+time_label <- function(x) {
+  if (x == "yearly") "Yearly" else "Cumulative"
+}
+
+measure_label <- function(x) {
+  if (x == "count") "Number of Cancers" else "Incidence"
+}
+
+late_title <- function(design_label, cumulative_or_interval, count_or_incidence) {
+  paste0(
+    time_label(cumulative_or_interval), " Late-Stage ", measure_label(count_or_incidence),
+    " and ", time_label(cumulative_or_interval), " Stage Shift under ", design_label, " Trial Design"
+  )
+}
+
+stage_only_title <- function(stage_label, design_label, cumulative_or_interval, count_or_incidence) {
+  paste0(
+    time_label(cumulative_or_interval), " ", stage_label, " ", measure_label(count_or_incidence),
+    " under ", design_label, " Trial Design"
+  )
+}
+```
+
+# Standard Trial Design Projections
+
+This section presents results under the standard trial design.  
+The first table always shows late-stage results and stage shift.  
+If selected above, separate early-stage and overall tables and figures are also shown.
+
+```{r standard-main-table}
+std_table_all <- stage_shift_by_design(
+  results = results,
+  design = "standard",
+  yearly_or_cumulative = cumulative_or_interval,
+  incidence_or_count = count_or_incidence,
+  early_stage = show_early,
+  overall = show_overall
+)
+```
+
+## Tables for the Standard Trial Design
+
+```{r standard-late-table}
+std_late_table <- std_table_all %>%
+  transmute(
+    `Time since randomization` = time_since_randomization,
+    `Age at start of interval` = age1,
+    `Age at end of interval` = age2,
+    `Period` = period,
+    `Control arm` = control_arm_detected_late,
+    `Screen-detected` = screen_detected_late,
+    `Interval-detected` = interval_detected_late,
+    `Total screen arm` = screen_arm_detected_late,
+    `Stage shift (%)` = stage_shift
+  )
+
+kable(
+  std_late_table,
+  caption = late_title("Standard", cumulative_or_interval, count_or_incidence)
+)
+```
+
+
+
+```{r standard-early-table, results='asis'}
+if (show_early) {
+  std_early_table <- std_table_all %>%
+    transmute(
+      `Time since randomization` = time_since_randomization,
+      `Age at start of interval` = age1,
+      `Age at end of interval` = age2,
+      `Period` = period,
+      `Control arm` = control_arm_detected_early,
+      `Screen-detected` = screen_detected_early,
+      `Interval-detected` = interval_detected_early,
+      `Total screen arm` = screen_arm_detected_early
+    )
+
+  print(kable(
+    std_early_table,
+    caption = stage_only_title("Early-Stage", "Standard", cumulative_or_interval, count_or_incidence)
+  ))
+}
+```
+
+
+```{r standard-overall-table, results='asis'}
+if (show_overall) {
+  std_overall_table <- std_table_all %>%
+    transmute(
+      `Time since randomization` = time_since_randomization,
+      `Age at start of interval` = age1,
+      `Age at end of interval` = age2,
+      `Period` = period,
+      `Control arm` = control_arm_detected_overall,
+      `Screen-detected` = screen_detected_overall,
+      `Interval-detected` = interval_detected_overall,
+      `Total screen arm` = screen_arm_detected_overall
+    )
+
+  print(kable(
+    std_overall_table,
+    caption = stage_only_title("Overall", "Standard", cumulative_or_interval, count_or_incidence)
+  ))
+}
+```
+
+## Figures for the Standard Trial Design
+
+```{r standard-overall-figure, fig.width=10, fig.height=8}
+p_standard <- plot_trial_panels(
+  trial_table_all = std_table_all,
+  show_early = show_early,
+  show_overall = show_overall,
+  cumulative_or_interval = cumulative_or_interval,
+  count_or_incidence = count_or_incidence,
+  design_name = "Standard Trial Design"
+)
+
+print(p_standard)
+```
+# Intended-Effect Trial Design Projections
+
+This section presents parallel results under the intended-effect design.  
+A positivity-rate table is shown first because intended-effect results are conditional on ever-positive status.
+
+## Positivity rate
+
+```{r positivity-rate}
+pos_rate <- get_positivity_rate(
+  sens_e = sens_e,
+  sens_l = sens_l,
+  screen_times = results$params$screen_times,
+  start_age = start_age,
+  rate_matrix = rate_matrix
+)
+
+positivity_tbl <- data.frame(
+  Measure = c(
+    "Early-stage screen-positive fraction",
+    "Late-stage screen-positive fraction",
+    "Overall screen-positive fraction"
+  ),
+  Value = c(
+    percent(pos_rate$positivity_early, accuracy = 0.1),
+    percent(pos_rate$positivity_late, accuracy = 0.1),
+    percent(pos_rate$positivity_overall, accuracy = 0.1)
+  )
+)
+
+kable(positivity_tbl, caption = "Positivity rate at the end of the screening period")
+```
+
+```{r ie-main-table}
+ie_table_all <- stage_shift_by_design(
+  results = results,
+  design = "IE",
+  yearly_or_cumulative = cumulative_or_interval,
+  incidence_or_count = count_or_incidence,
+  early_stage = show_early,
+  overall = show_overall
+)
+```
+
+## Tables for the Intended Effect Trial Design
+
+```{r ie-late-table}
+ie_late_table <- ie_table_all %>%
+  transmute(
+    `Time since randomization` = time_since_randomization,
+    `Age at start of interval` = age1,
+    `Age at end of interval` = age2,
+    `Period` = period,
+    `Control arm` = control_arm_detected_late,
+    `Screen-detected` = screen_detected_late,
+    `Interval-detected` = interval_detected_late,
+    `Total screen arm` = screen_arm_detected_late,
+    `Stage shift (%)` = stage_shift
+  )
+
+kable(
+  ie_late_table,
+  caption = late_title("Intended-Effect", cumulative_or_interval, count_or_incidence)
+)
+```
+
+
+
+```{r ie-early-table, results='asis'}
+if (show_early) {
+  ie_early_table <- ie_table_all %>%
+    transmute(
+      `Time since randomization` = time_since_randomization,
+      `Age at start of interval` = age1,
+      `Age at end of interval` = age2,
+      `Period` = period,
+      `Control arm` = control_arm_detected_early,
+      `Screen-detected` = screen_detected_early,
+      `Interval-detected` = interval_detected_early,
+      `Total screen arm` = screen_arm_detected_early
+    )
+
+  print(kable(
+    ie_early_table,
+    caption = stage_only_title("Early-Stage", "Intended-Effect", cumulative_or_interval, count_or_incidence)
+  ))
+}
+```
+```{r ie-overall-table, results='asis'}
+if (show_overall) {
+  ie_overall_table <- ie_table_all %>%
+    transmute(
+      `Time since randomization` = time_since_randomization,
+      `Age at start of interval` = age1,
+      `Age at end of interval` = age2,
+      `Period` = period,
+      `Control arm` = control_arm_detected_overall,
+      `Screen-detected` = screen_detected_overall,
+      `Interval-detected` = interval_detected_overall,
+      `Total screen arm` = screen_arm_detected_overall
+    )
+
+  print(kable(
+    std_overall_table,
+    caption = stage_only_title("Overall", "Standard", cumulative_or_interval, count_or_incidence)
+  ))
+}
+```
+## Figures for the Intended Effect Design
+
+```{r ie-overall-figure, fig.width=10, fig.height=8}
+p_intended <- plot_trial_panels(
+  trial_table_all = ie_table_all,
+  show_early = show_early,
+  show_overall = show_overall,
+  cumulative_or_interval = cumulative_or_interval,
+  count_or_incidence = count_or_incidence,
+  design_name = "Intended-Effect Trial Design"
+)
+print(p_intended)
+```
+
+# Per-arm / total sample size and achieved power
+
+This section computes:
+- the required total sample size for the target power
+- the achieved power under the current sample sizes
+- for both the standard and intended-effect designs
+
+```{r power-inputs}
+alpha <- 0.025
+target_power <- 0.80
+N_total_current <- n_control + n_screen
+R <- n_control / n_screen
+
+power_input_tbl <- data.frame(
+  Parameter = c(
+    "Significance level (alpha)",
+    "Target power (%)",
+    "Number in control arm",
+    "Number in screen arm",
+    "Total sample size",
+    "Allocation ratio (R = n_control / n_screen)"
+  ),
+  Value = c(
+    alpha,
+    target_power*100,
+    format(n_control, big.mark = ","),
+    format(n_screen, big.mark = ","),
+    format(N_total_current, big.mark = ","),
+    round(R, 3)
+  )
+)
+
+kable(power_input_tbl, caption = "Power calculation inputs")
+```
+
+```{r power-calculations}
+pi_pos <- get_positivity_rate(
+  sens_e = sens_e,
+  sens_l = sens_l,
+  screen_times = results$params$screen_times,
+  start_age = start_age,
+  rate_matrix = rate_matrix
+)$positivity_overall
+
+p_c_standard <- tail(
+  results$control$standard$late$incidence$cumulative$control_arm_detected,
+  1
+)
+
+p_s_standard <- tail(
+  results$screen$standard$late$incidence$cumulative$screen_arm_detected,
+  1
+)
+
+p_c_ie <- tail(
+  results$control$IE$late$incidence$cumulative$control_arm_detected,
+  1
+)
+
+p_s_ie <- tail(
+  results$screen$IE$late$incidence$cumulative$screen_arm_detected,
+  1
+)
+
+n_required_standard <- n_trad_required(
+  power = target_power,
+  p_c = p_c_standard,
+  p_s = p_s_standard,
+  alpha = alpha,
+  R = R
+)
+
+n_required_ie <- n_ie_required(
+  power = target_power,
+  pi_pos = pi_pos,
+  p_c_ie = p_c_ie,
+  p_s_ie = p_s_ie,
+  alpha = alpha,
+  R = R
+)
+
+power_current_standard <- power_trad(
+  n_total = N_total_current,
+  p_c = p_c_standard,
+  p_s = p_s_standard,
+  alpha = alpha,
+  R = R
+)
+
+power_current_ie <- power_ie(
+  n_total = N_total_current,
+  pi_pos = pi_pos,
+  p_c_ie = p_c_ie,
+  p_s_ie = p_s_ie,
+  alpha = alpha,
+  R = R
+)
+
+efficiency_ratio <- n_required_ie / n_required_standard
+```
+
+```{r power-table}
+power_summary_tbl <- data.frame(
+  Trial_Design = c("Standard", "Intended-Effect"),
+  `Cumulative_incidence_control_arm` = c(p_c_standard, p_c_ie),
+  `Cumulative_incidence_screen_arm` = c(p_s_standard, p_s_ie),
+  `Required_total_sample_size` = c(
+    round(n_required_standard, 0),
+    round(n_required_ie, 0)
+  ),
+  `Power_under_current_design` = c(
+    round(power_current_standard, 3)*100,
+    round(power_current_ie, 3)*100
+  )
+)
+
+kable(
+  power_summary_tbl,
+  caption = paste0(
+    "Required total sample size and achieved power under each trial design ",
+    "(current total N = ", format(N_total_current, big.mark = ","), ")"
+  )
+)
+```
+
+```{r power-ratio-table}
+ratio_tbl <- data.frame(
+  Measure = c(
+    "Number of participants in control arm",
+    "Number of participants in screen arm",
+    "Number of participants in the trial",
+    "Allocation ratio R = n_control / n_screen",
+    "Positivity rate",
+    "Required N ratio: IE / Standard"
+  ),
+  Value = c(
+    format(n_control, big.mark = ","),
+    format(n_screen, big.mark = ","),
+    format(N_total_current, big.mark = ","),
+    round(R, 3),
+    round(pi_pos, 4),
+    round(efficiency_ratio, 2)
+  )
+)
+
+kable(
+  ratio_tbl,
+  caption = "Current allocation, positivity rate, and sample-size ratio"
+)
+```
+
+# Interpretation
+
+- Standard design results are population-level projections.
+- Intended-effect design results are conditional on ever-positive individuals.
+- To explore alternative projections or sample-size requirements, users can change:
+  - number of screens
+  - screening interval
+  - follow-up duration
+  - test sensitivities
