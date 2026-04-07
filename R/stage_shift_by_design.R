@@ -25,28 +25,24 @@
 # Results can be returned as yearly or cumulative measures, with optional
 # inclusion of early-stage and overall outcomes.
 #####################################################################
-
-library(msm)
-library(dplyr)
-
 #####################################################################
 # 1. NATURAL HISTORY MODEL FUNCTIONS
 #####################################################################
 
+#' Compute initial state distribution at starting age
+#'
+#' Computes the initial state distribution at the specified starting age,
+#' conditional on not yet being clinically diagnosed. The distribution is
+#' restricted to preclinical states (including healthy and preclinical disease).
+#'
+#' @param rate_matrix Transition rate matrix.
+#' @param start_age Numeric value specifying the starting age.
+#'
+#' @return A numeric vector representing the initial state distribution over
+#'   non-clinical states.
+#' @export  
 get_init <- function(rate_matrix, start_age) {
-  # --------------------------------------------------
-  # Description:
-  # Computes the initial state distribution at the starting age, conditional on
-  # not yet being clinically diagnosed. The distribution is restricted to
-  # preclinical (including healthy and preclinical disease) states.
-  #
-  # Inputs:
-  # - rate_matrix: transition rate matrix
-  # - start_age: starting age
-  #
-  # Outputs:
-  # - Initial state distribution vector over non-clinical states
-  # --------------------------------------------------
+ 
   k <- nrow(rate_matrix)
   init <- vector()
   init[k] <- 0
@@ -62,20 +58,18 @@ get_init <- function(rate_matrix, start_age) {
   init
 }
 
+#' Construct emission probability matrix
+#'
+#' Builds the emission probability matrix linking latent disease states to
+#' observed screen-detected and clinically detected states. Assumes perfect
+#' specificity of tests.
+#'
+#' @param k Integer specifying the number of latent states.
+#' @param sens_e Numeric value for early-stage sensitivity.
+#' @param sens_l Numeric value for late-stage sensitivity.
+#'
+#' @return A matrix of emission probabilities mapping latent states to observed states.
 get_emission <- function(k, sens_e, sens_l) {
-  # --------------------------------------------------
-  # Description:
-  # Builds the emission probability matrix linking latent disease states to
-  # observed screen-detected and clinically detected states.
-  #
-  # Inputs:
-  # - k: number of latent states
-  # - sens_e: early-stage sensitivity
-  # - sens_l: late-stage sensitivity
-  #
-  # Outputs:
-  # - Emission probability matrix
-  # --------------------------------------------------
   emit <- matrix(0, nrow = k, ncol = 5)
   
   emit[1:(k - 4), 1] <- 1
@@ -92,22 +86,20 @@ get_emission <- function(k, sens_e, sens_l) {
   emit
 }
 
+#' Create event time list for detection processes
+#'
+#' Creates a list of times corresponding to screen detection, interval detection,
+#' or clinical detection in the post-screen period.
+#'
+#' @param screen_times Numeric vector of screening times.
+#' @param preclin Logical indicating whether the event is screen-detected.
+#' @param post Logical indicating whether the event is post-screen clinical detection.
+#' @param extended_followup Numeric value specifying additional follow-up time after the last screen.
+#'
+#' @return A list of sequences of times for use in the HMM likelihood.
 get_times <- function(screen_times, preclin = FALSE, post = FALSE, extended_followup = NULL) {
-  # --------------------------------------------------
-  # Description:
-  # Creates times for screen detection, interval detection, or
-  # postscreen detection.
-  #
-  # Inputs:
-  # - screen_times: vector of screen times
-  # - preclin: whether the event is screen-detected
-  # - post: whether the event is postscreen clinical detection
-  # - extended_followup: additional follow-up time after the last screen
-  #
-  # Outputs:
-  # - List of times
-  # --------------------------------------------------
-  if (post) {
+
+    if (post) {
     if (is.null(extended_followup)) stop("Need extended_followup when post = TRUE")
     return(list(c(screen_times, max(screen_times) + extended_followup)))
   }
@@ -144,26 +136,24 @@ get_times <- function(screen_times, preclin = FALSE, post = FALSE, extended_foll
   the_times
 }
 
+#' Create observed state sequences for detection outcomes
+#'
+#' Creates observed state sequences corresponding to screen-detected,
+#' interval-detected, or post-screen detected outcomes.
+#'
+#' @param screen_times Numeric vector of screening times.
+#' @param stage Character string indicating stage ("early" or "late").
+#' @param preclin Logical indicating whether the event is screen-detected.
+#' @param post Logical indicating whether the event is post-screen clinical detection.
+#' @param extended_followup Numeric value specifying additional follow-up time after the last screen.
+#'
+#' @return A list of sequences of observed states for use in the HMM computation.
 get_data <- function(screen_times,
                      stage = c("early", "late"),
                      preclin = FALSE,
                      post = FALSE,
                      extended_followup = NULL) {
-  # --------------------------------------------------
-  # Description:
-  # Creates observed states for screen-detected, interval-detected, or
-  # postscreen-detected outcomes.
-  #
-  # Inputs:
-  # - screen_times: vector of screen times
-  # - stage: "early" or "late"
-  # - preclin: whether the event is screen-detected
-  # - post: whether the event is postscreen clinical detection
-  # - extended_followup: additional follow-up time after the last screen
-  #
-  # Outputs:
-  # - List of observed states
-  # --------------------------------------------------
+
   stage <- match.arg(stage)
   
   preclin_code <- if (stage == "early") 2 else 3
@@ -207,28 +197,25 @@ get_data <- function(screen_times,
   the_data
 }
 
+#' Compute transition probability matrices over observation intervals
+#'
+#' Computes lists of transition probability matrices for multiple observation
+#' intervals under a time-homogeneous continuous-time Markov chain:
+#' P(t2 - t1), P(t3 - t2), ..., P(tn - t_{n-1}).
+#'
+#' If an interval corresponds to an exact event time, that interval is evaluated
+#' using a transition density rather than a transition probability. This is
+#' implemented by multiplying the transition probability matrix by the
+#' off-diagonal part of the rate matrix.
+#'
+#' @param time_intervals_list List of numeric vectors representing interval endpoints.
+#' @param rate_matrix_list List of transition rate matrices.
+#' @param exact_time_rank Optional integer index of the interval to evaluate as a density
+#'   (i.e., exact event time).
+#'
+#' @return A list of lists of transition probability matrices, one for each observation pattern.
 transition_prob_all <- function(time_intervals_list, rate_matrix_list, exact_time_rank = NULL) {
-  # --------------------------------------------------
-  # author JL 2/7/2011
-  # Description:
-  # Computes lists of transition probability matrices for several observation
-  # intervals under a time-homogeneous continuous-time Markov chain:
-  # P(t2 - t1), P(t3 - t2), ..., P(tn - t_{n-1}).
-  #
-  # If an interval corresponds to an exact event time, that interval is evaluated
-  # using a transition density rather than a transition probability. This is
-  # implemented by multiplying the transition probability matrix by the
-  # off-diagonal part of the rate matrix.
-  #
-  # Inputs:
-  # - time_intervals_list: list of interval vectors
-  # - rate_matrix_list: list of transition rate matrices
-  # - exact_time_rank: optional index of the interval to evaluate as a density
-  #   (i.e., exact event time)
-  #
-  # Outputs:
-  # - List of transition probability-matrix lists, one for each observation pattern
-  # --------------------------------------------------
+
    mapply(
     FUN = function(time.intervals, rate.matrix) {
       probs.list <- lapply(time.intervals, FUN = "MatrixExp", mat = rate.matrix)
@@ -251,21 +238,29 @@ transition_prob_all <- function(time_intervals_list, rate_matrix_list, exact_tim
   )
 }
 
+#' Compute forward and backward probabilities for a hidden Markov model
+#'
+#' Computes forward probabilities, backward probabilities, and the observed-data
+#' log-likelihood for a hidden Markov model.
+#'
+#' @param x Observed data sequence.
+#' @param Pi List of transition probability matrices for intervals
+#'   \(t_1 - t_2\), \(t_2 - t_3\), ..., \(t_{n-1} - t_n\).
+#' @param delta Numeric vector giving the initial distribution of hidden states.
+#' @param emission_matrix Matrix of emission probabilities. The \(i\)th row
+#'   corresponds to the hidden state \(X(t)=i\), and the \(k\)th column gives
+#'   \(P(O(t)=k \mid X(t)=i)\). Rows should sum to 1, and columns correspond to
+#'   the possible observed states.
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{logalpha}{Log forward probabilities.}
+#'   \item{logbeta}{Log backward probabilities.}
+#'   \item{LL}{Observed-data log-likelihood.}
+#' }
+#'
 forwardback <- function(x, Pi, delta, emission_matrix) {
-  #################################################################################
-  #Author: JL, 2/4/2011
-  #This function computes forward and backward probabilties and observed data log likelihood
-  # for a hidden markov model
-  #INPUTS: x=observed data
-  #        Pi=list of transition probabilities from t1-t2, t2-t3,...,t_n-1-t_n
-  #        delta = vector corresponding to initial distribution of hidden states
-  #
-  #        emmision.matrix=a matrix with the emission probablities.
-  #        the ith row corresponds to the hidden value X(t)=i, and the kth column to O(t)=k|X(t)=i
-  #        thus the rows sum to 1, and k columns correspond to the k possible observed states
-  #OUTPUTS: a list with logalpha (log of forward probabilities), logbeta (log of backward probs),
-  #         and LL (log likelihoodd of the observed data)
-  ####################################################################################
+
   if (length(x) == 1) {
     LL <- as.numeric(log(sum(emission_matrix[, x] * delta)))
     return(list(LL = LL))
@@ -311,25 +306,24 @@ forwardback <- function(x, Pi, delta, emission_matrix) {
   )
 }
 
+#' Compute likelihood for one or more hidden Markov model observations
+#'
+#' Computes the likelihood across one or more observations under the hidden
+#' Markov model.
+#'
+#' @param rates_list List of transition rate matrices.
+#' @param init_list List of initial state distributions.
+#' @param emission_list List of emission matrices.
+#' @param obs_data_list List of observed state sequences.
+#' @param obs_times_list List of observation times.
+#' @param exact_time_rank Optional integer index of the interval with
+#'   exact-event adjustment.
+#'
+#' @return The total likelihood across the given observations. 
 likelihood <- function(rates_list, init_list, emission_list,
                        obs_data_list, obs_times_list,
                        exact_time_rank = NULL) {
-  # --------------------------------------------------
-  # Description:
-  # Computes the likelihood across one or more observations under the
-  # hidden Markov model.
-  #
-  # Inputs:
-  # - rates_list: list of transition rate matrices
-  # - init_list: list of initial state distributions
-  # - emission_list: list of emission matrices
-  # - obs_data_list: list of observed state sequences
-  # - obs_times_list: list of observation times
-  # - exact_time_rank: optional index of interval with exact-event adjustment
-  #
-  # Outputs:
-  # - Total likelihood across the given observations.
-  # --------------------------------------------------
+ 
   time_diffs_list <- lapply(obs_times_list, diff)
   
   transition_probabilities_list <- transition_prob_all(
@@ -355,21 +349,18 @@ likelihood <- function(rates_list, init_list, emission_list,
 #####################################################################
 # 2. STANDARD TRIAL DESIGN INCIDENCE PROJECTION FUNCTIONS
 #####################################################################
-
+#' Compute control-arm incidence over an age interval under the standard design
+#'
+#' Computes control-arm incidence in a specified age interval under the
+#' standard design.
+#'
+#' @param rate_matrix Transition rate matrix.
+#' @param age1 Numeric value giving the start of the age interval.
+#' @param age2 Numeric value giving the end of the age interval.
+#' @param stage Character string indicating stage ("early" or "late").
+#'
+#' @return Interval incidence in the control arm.
 get_control_incidence_standard <- function(rate_matrix, age1, age2, stage = c("early", "late")) {
-  # --------------------------------------------------
-  # Description:
-  # Computes control-arm incidence in an age interval under the standard design.
-  #
-  # Inputs:
-  # - rate_matrix: transition rate matrix
-  # - age1: start of interval
-  # - age2: end of interval
-  # - stage: "early" or "late"
-  #
-  # Outputs:
-  # - Interval incidence in the control arm
-  # --------------------------------------------------
   stage <- match.arg(stage)
   
   prob_mat_a1 <- MatrixExp(t = age1, mat = rate_matrix)
@@ -382,27 +373,24 @@ get_control_incidence_standard <- function(rate_matrix, age1, age2, stage = c("e
     (1 - prob_mat_a1[1, k] - prob_mat_a1[1, k - 1])
 }
 
+#' Compute screen-arm incidence under the standard design
+#'
+#' Computes screen-arm incidence under the standard design for screen-detected,
+#' interval-detected, or post-screen outcomes.
+#'
+#' @param sens_e Numeric value for early-stage sensitivity.
+#' @param sens_l Numeric value for late-stage sensitivity.
+#' @param screen_times Numeric vector of screening times.
+#' @param age1 Numeric value giving the starting age.
+#' @param rate_matrix Transition rate matrix.
+#' @param stage Character string indicating stage ("early" or "late").
+#' @param preclin Logical indicating whether the event is screen-detected.
+#' @param post Logical indicating whether the event is post-screen clinical detection.
+#' @param extended_followup Numeric value specifying additional follow-up time after the last screen.
+#'
+#' @return Cumulative incidence for the specified screen-arm detection type.    
 get_screen_incidence_standard <- function(
-    # --------------------------------------------------
-    # Description:
-    # Computes screen-arm incidence under the standard design for screen-detected,
-    # interval-detected, or postscreen outcomes.
-    #
-    # Inputs:
-    # - sens_e: early-stage sensitivity
-    # - sens_l: late-stage sensitivity
-    # - screen_times: vector of screen times
-    # - age1: starting age
-    # - rate_matrix: transition rate matrix
-    # - stage: "early" or "late"
-    # - preclin: whether the event is screen-detected
-    # - post: whether the event is postscreen clinical detection
-    # - extended_followup: additional follow-up after the last screen
-    #
-    # Outputs:
-    # - Cumulative incidence for the specified screen-arm detection type.
-    # --------------------------------------------------
-    sens_e, sens_l,
+   sens_e, sens_l,
     screen_times, age1, rate_matrix,
     stage = c("early", "late"),
     preclin = FALSE,
@@ -446,27 +434,25 @@ get_screen_incidence_standard <- function(
 #####################################################################
 # 3. INTENDED EFFECT DESIGN INCIDENCE PROJECTION FUNCTIONS
 #####################################################################
-
+#' Compute true positivity rates across the screening period
+#'
+#' Computes early-stage, late-stage, and overall true positivity rates
+#' (i.e., screen-positive probabilities) across the entire screening period.
+#'
+#' @param sens_e Numeric value for early-stage sensitivity.
+#' @param sens_l Numeric value for late-stage sensitivity.
+#' @param screen_times Numeric vector of screening times.
+#' @param start_age Numeric value specifying the starting age.
+#' @param rate_matrix Transition rate matrix.
+#'
+#' @return A list with components:
+#' \describe{
+#'   \item{positivity_early}{True positivity rate for early-stage disease.}
+#'   \item{positivity_late}{True positivity rate for late-stage disease.}
+#'   \item{positivity_overall}{Overall true positivity rate.}
+#' }
 get_positivity_rate <- function(sens_e, sens_l, screen_times, start_age, rate_matrix) {
-  # --------------------------------------------------
-  # Description:
-  # Computes early-stage, late-stage, and overall true positivity rates (i.e. screen positive) across the
-  # entire screen period.
-  #
-  # Inputs:
-  # - sens_e: early-stage sensitivity
-  # - sens_l: late-stage sensitivity
-  # - screen_times: vector of screen times
-  # - start_age: starting age
-  # - rate_matrix: transition rate matrix
-  #
-  # Outputs:
-  # - List with:
-  #     positivity_early
-  #     positivity_late
-  #     positivity_overall
-  # --------------------------------------------------
-  positivity_early <- get_screen_incidence_standard(
+    positivity_early <- get_screen_incidence_standard(
     sens_e = sens_e,
     sens_l = sens_l,
     screen_times = screen_times,
@@ -494,7 +480,7 @@ get_positivity_rate <- function(sens_e, sens_l, screen_times, start_age, rate_ma
 }
 
 get_control_incidence_ie <- function(
-    # --------------------------------------------------
+  # --------------------------------------------------
     # Description:
     # Computes control-arm interval incidence under the intended-effect design,
     # conditional on ever-positive status.
