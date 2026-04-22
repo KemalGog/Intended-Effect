@@ -2,15 +2,17 @@ library(here)
 library(dplyr)
 library(ggplot2)
 library(patchwork)
-library(survminer)
 library(grid)
+library(cowplot)
+
 thedata=read.csv(here("Fitting of Natural History Model/Jane/toy_analysis.csv"))%>%
   mutate(combo=paste0(OMST,"_",LMST,"_",Sens.early....,"_",Sens.late....,"_",Specificity....),
          design=paste0(X..screens,"_",Follow.up ))
 
 
+make_plots<-function(thedata,specificity,sens_late,the_LMST){
 n_plot_traditional = ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90 & LMST==1),
+  data = subset(thedata, Specificity.... == specificity & Sens.late.... == sens_late & LMST== the_LMST),
   aes(x = design, y = N.Traditional)
 ) +
   geom_point(aes(color = combo), shape = 1) +
@@ -22,7 +24,7 @@ n_plot_traditional = ggplot(
   labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
 
 n_plot_IE = ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90&LMST==1),
+  data = subset(thedata, Specificity.... == specificity & Sens.late.... == sens_late&LMST== the_LMST),
   aes(x = design, y = N.IE)
 ) +
   geom_point(aes(color = combo), shape = 1) +
@@ -34,7 +36,7 @@ n_plot_IE = ggplot(
   labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
 
 n_plot_PA = ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90&LMST==1),
+  data = subset(thedata, Specificity.... == specificity & Sens.late.... == sens_late&LMST== the_LMST),
   aes(x = design, y = N.PA)
 ) +
   geom_point(aes(color = combo), shape = 1) +
@@ -46,7 +48,30 @@ n_plot_PA = ggplot(
   labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
 
 RE_plot_PA = ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90&LMST==1),
+  data = subset(thedata, Specificity.... == specificity & Sens.late.... == sens_late&LMST== the_LMST),
+  aes(x = design, y = N_Traditional...N_PA)
+) +
+  geom_point(aes(color = combo), shape = 1) +
+  geom_line(aes(color = combo, group = combo)) +
+  theme_bw() + ylim(1,1.5)+
+  theme(axis.title = element_blank()) +
+  ggtitle("RE PA") +
+  labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
+
+RE_plot_IE = ggplot(
+  data = subset(thedata, Specificity.... == specificity & Sens.late.... == sens_late&LMST== the_LMST),
+  aes(x = design, y = N_Traditional...N_IE)
+) +
+  geom_point(aes(color = combo), shape = 1) +
+  geom_line(aes(color = combo, group = combo)) +
+  theme_bw() + ylim(1,10)+
+  theme(axis.title = element_blank()) +
+  ggtitle("RE IE") +
+  labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
+
+
+RE_plot_PA2 = ggplot(
+  data = subset(thedata, Specificity.... == specificity & Sens.early.... == 40&OMST==2),
   aes(x = design, y = N_Traditional...N_PA)
 ) +
   geom_point(aes(color = combo), shape = 1) +
@@ -56,38 +81,10 @@ RE_plot_PA = ggplot(
   ggtitle("RE PA") +
   labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
 
-RE_plot_IE = ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90&LMST==1),
-  aes(x = design, y = N_Traditional...N_IE)
-) +
-  geom_point(aes(color = combo), shape = 1) +
-  geom_line(aes(color = combo, group = combo)) +
-  theme_bw() +
-  theme(axis.title = element_blank()) +
-  ggtitle("RE IE") +
-  labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
-
-sample_size_RR = ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90 &Follow.up==2 & X..screens==3),
-  aes(x = RR.Traditional , y = N.IE)
-) +
-  geom_point(aes(color = combo), shape = 1) +
-  geom_line(aes(color = combo, group = combo)) +
-  theme_bw() +
-  theme(axis.title = element_blank()) +
-  ggtitle("Sample size versus effect size") +
-  labs(colour = "OMST_LMST_EarlySens_LateSens_Specificity")
-
-
-
-
-
 ################################################
 #Chat GPT combined plot
 ###############################################
-library(ggplot2)
-library(cowplot)
-library(grid)
+
 
 # Remove legends from all plots
 p1 <- n_plot_traditional + theme(legend.position = "none")
@@ -97,7 +94,7 @@ p4 <- RE_plot_PA + theme(legend.position = "none")
 p5 <- RE_plot_IE + theme(legend.position = "none")
 
 legend_plot <- ggplot(
-  data = subset(thedata, Specificity.... == 100 & Sens.late.... == 90&LMST==1),
+  data = subset(thedata, Specificity.... == specificity & Sens.late.... == sens_late&LMST== the_LMST),
   aes(x = design, y = N.Traditional)
 ) +
   geom_point(aes(color = combo), shape = 1) +
@@ -130,4 +127,22 @@ final_plot <- plot_grid(
   rel_heights = c(1, 0.06)
 )
 
-final_plot
+final_plot_with_title <- ggdraw() +
+  draw_label(
+    paste0("LMST=", the_LMST, " LateSens=", sens_late, " Specificity=", specificity),
+    x = 0.5, y = 0.98,
+    hjust = 0.5, vjust = 1,
+    fontface = "bold",
+    size = 14
+  ) +
+  draw_plot(final_plot, y = 0, height = 0.95)
+
+return(final_plot=final_plot_with_title)
+}
+
+plot1=make_plots(thedata=thedata,specificity=90,the_LMST=1,sens_late=90)
+plot2=make_plots(thedata=thedata,specificity=100,the_LMST=1,sens_late=90)
+plot3=make_plots(thedata=thedata,specificity=100,the_LMST=1,sens_late=60)
+
+
+
